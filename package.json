@@ -1,0 +1,22 @@
+{
+  "name": "multi-agent-playground",
+  "version": "0.0.0",
+  "private": true,
+  "workspaces": [
+    "frontend",
+    "backend"
+  ],
+  "engines": {
+    "node": "^24.15.0",
+    "npm": ">=11"
+  },
+  "scripts": {
+    "dev": "concurrently --kill-others --names frontend,backend \"npm run dev --workspace frontend\" \"npm run dev --workspace backend\"",
+    "build": "npm run build --workspaces",
+    "typecheck": "npm run typecheck --workspaces",
+    "test": "npm test --workspaces"
+  },
+  "devDependencies": {
+    "concurrently": "^10.0.6"
+  }
+}

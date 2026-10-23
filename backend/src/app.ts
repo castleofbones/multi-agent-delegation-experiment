@@ -63,12 +63,35 @@ export function createApp(database: DatabaseSync, aliasGenerator: AliasGenerator
   const incrementAndGetLink = database.prepare(
     'UPDATE links SET usage_count = usage_count + 1 WHERE alias = ? RETURNING destination_url',
   )
+  const listLinks = database.prepare(
+    'SELECT alias, destination_url, usage_count FROM links ORDER BY alias COLLATE BINARY',
+  )
+  const deleteLink = database.prepare('DELETE FROM links WHERE alias = ?')
   const app = express()
   app.disable('x-powered-by')
   app.use(express.json())
 
   app.get('/api/health', (_request, response) => {
     response.json({ status: 'ok', service: 'backend' })
+  })
+
+  app.get('/api/links', (_request, response) => {
+    const links = listLinks.all().map((link) => ({
+      alias: link.alias,
+      url: link.destination_url,
+      usageCount: link.usage_count,
+    }))
+    response.json(links)
+  })
+
+  app.delete('/api/links/:alias', (request, response) => {
+    const result = deleteLink.run(request.params.alias)
+    if (result.changes === 0) {
+      response.status(404).json({ error: 'Not found' })
+      return
+    }
+
+    response.status(204).end()
   })
 
   app.get('/:alias', (request, response) => {

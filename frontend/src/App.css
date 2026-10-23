@@ -1,0 +1,71 @@
+:root {
+  font-family: 'DM Sans', sans-serif;
+  color: #17231f;
+  background: #f4f7f5;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  font-weight: 400;
+  font-size: 16px;
+}
+
+* { box-sizing: border-box; }
+body { min-width: 320px; min-height: 100vh; margin: 0; }
+button, input { font: inherit; }
+button { cursor: pointer; }
+button:focus-visible, input:focus-visible, a:focus-visible { outline: 3px solid #83c8a1; outline-offset: 3px; }
+
+.dashboard { width: min(100% - 40px, 920px); margin: 0 auto; padding: 68px 0 80px; }
+.page-header { margin-bottom: 38px; }
+.eyebrow { margin: 0 0 8px; color: #638071; font-size: .72rem; font-weight: 700; letter-spacing: .13em; }
+h1, h2, h3, p { margin-top: 0; }
+h1, h2, h3 { font-family: 'Manrope', sans-serif; }
+h1 { margin-bottom: 8px; font-size: clamp(2.2rem, 5vw, 3.25rem); letter-spacing: -.055em; line-height: 1.1; }
+.intro { margin-bottom: 0; color: #64736b; font-size: 1.05rem; }
+.panel { border: 1px solid #e1e9e4; border-radius: 14px; background: #fff; box-shadow: 0 5px 20px rgb(24 57 39 / 4%); }
+.create-panel { padding: 26px 28px; }
+.create-panel h2, .section-heading h2 { margin-bottom: 21px; font-size: 1.25rem; letter-spacing: -.025em; }
+.form-fields { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(210px, 1fr); gap: 18px; margin-bottom: 20px; }
+.field { display: grid; gap: 8px; color: #34483d; font-size: .88rem; font-weight: 600; }
+.optional { color: #839087; font-weight: 400; }
+.field input { width: 100%; min-height: 46px; border: 1px solid #d7e1db; border-radius: 8px; padding: 0 13px; color: #17231f; background: #fcfdfc; }
+.field input::placeholder { color: #9ba8a0; }
+.field input:focus { border-color: #3c8b61; outline: 3px solid rgb(60 139 97 / 15%); }
+.primary-button, .secondary-button, .delete-button { min-height: 40px; border: 0; border-radius: 8px; padding: 0 15px; font-weight: 600; transition: background .15s ease, color .15s ease; }
+.primary-button { color: #fff; background: #247347; }
+.primary-button:hover:not(:disabled) { background: #195f39; }
+.primary-button:disabled { cursor: wait; opacity: .65; }
+.links-section { margin-top: 48px; }
+.section-heading { display: flex; align-items: end; justify-content: space-between; margin-bottom: 17px; }
+.section-heading .eyebrow { margin-bottom: 5px; }
+.section-heading h2 { margin: 0; font-size: 1.55rem; }
+.link-count { padding: 5px 10px; border-radius: 99px; color: #53675b; background: #e8efea; font-size: .78rem; font-weight: 600; }
+.link-list { display: grid; gap: 12px; margin: 0; padding: 0; list-style: none; }
+.link-card { display: flex; align-items: center; justify-content: space-between; gap: 22px; padding: 20px 22px; }
+.link-main { min-width: 0; }
+.link-title-row { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-bottom: 7px; }
+.link-title-row h3 { margin: 0; font-size: 1.08rem; }
+.usage-count { color: #66756c; font-size: .78rem; }
+.short-url, .destination-url { display: block; overflow-wrap: anywhere; }
+.short-url { width: fit-content; margin-bottom: 7px; color: #247347; font-weight: 600; text-decoration: none; }
+.short-url:hover, .destination-url:hover { text-decoration: underline; }
+.destination-url { color: #77847c; font-size: .87rem; text-decoration: none; }
+.link-actions { display: flex; flex-shrink: 0; gap: 8px; }
+.secondary-button { border: 1px solid #d7e1db; color: #34483d; background: #fff; }
+.secondary-button:hover { background: #f0f5f1; }
+.delete-button { color: #9d3e38; background: #fff0ee; }
+.delete-button:hover { color: #fff; background: #a8423c; }
+.state-message { padding: 22px 24px; margin-bottom: 0; color: #68776e; }
+.message { border-radius: 9px; padding: 12px 15px; margin: 16px 0 0; font-size: .92rem; }
+.message.error { border: 1px solid #f0c8c4; color: #8e302c; background: #fff4f2; }
+.message.success { border: 1px solid #c5e2ce; color: #245f3a; background: #eef8f1; }
+
+@media (max-width: 620px) {
+  .dashboard { width: min(100% - 30px, 920px); padding-top: 42px; }
+  .form-fields { grid-template-columns: 1fr; gap: 15px; }
+  .create-panel { padding: 21px 18px; }
+  .link-card { align-items: flex-start; flex-direction: column; gap: 16px; padding: 18px; }
+  .link-actions { width: 100%; }
+  .link-actions button { flex: 1; }
+}

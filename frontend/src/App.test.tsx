@@ -1,50 +1,196 @@
-import { render, screen } from '@testing-library/react'
-import { describe, expect, it, vi } from 'vitest'
+import { fireEvent, render, screen, within } from '@testing-library/react'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import App from './App'
 
-describe('backend health', () => {
-  it('shows a loading state while waiting for the backend', () => {
-    vi.stubGlobal('fetch', vi.fn(() => new Promise(() => {})))
+const link = { alias: 'docs', url: 'https://example.com/docs', usageCount: 7 }
+
+function jsonResponse(data: unknown, status = 200) {
+  return new Response(JSON.stringify(data), {
+    status,
+    headers: { 'Content-Type': 'application/json' },
+  })
+}
+
+function setupClipboard() {
+  const writeText = vi.fn().mockResolvedValue(undefined)
+  vi.stubGlobal('navigator', Object.assign(Object.create(navigator), { clipboard: { writeText } }))
+  return writeText
+}
+
+beforeEach(() => {
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse([])))
+})
+
+describe('link dashboard', () => {
+  it('shows loading and then an empty state', async () => {
+    let resolveList!: (response: Response) => void
+    vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>((resolve) => { resolveList = resolve })))
 
     render(<App />)
 
-    expect(screen.getByRole('status')).toHaveTextContent('Checking backend health')
+    expect(screen.getByRole('status')).toHaveTextContent('Loading your links')
+    const createButton = screen.getByRole('button', { name: 'Create short link' })
+    expect(createButton).toBeDisabled()
+    fireEvent.change(screen.getByLabelText('Destination URL'), { target: { value: 'https://example.com' } })
+    fireEvent.click(createButton)
+    expect(fetch).toHaveBeenCalledTimes(1)
+
+    resolveList(jsonResponse([]))
+    expect(await screen.findByText('No links yet. Create one above to get started.')).toBeInTheDocument()
+    expect(createButton).toBeEnabled()
   })
 
-  it('displays the backend health status', async () => {
-    const fetchMock = vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({ status: 'ok', service: 'backend' })),
-    )
+  it('lists links with the full short URL, destination and usage count', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse([link])))
+
+    render(<App />)
+
+    expect(await screen.findByRole('heading', { name: 'docs' })).toBeInTheDocument()
+    const shortUrl = `${window.location.origin}/docs`
+    expect(screen.getByRole('link', { name: shortUrl })).toHaveAttribute('href', shortUrl)
+    expect(screen.getByRole('link', { name: link.url })).toHaveAttribute('target', '_blank')
+    expect(screen.getByText('7 visits')).toBeInTheDocument()
+    expect(fetch).toHaveBeenCalledWith('/api/links', { signal: expect.any(AbortSignal) })
+  })
+
+  it('creates a generated short link without sending a custom alias', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse([]))
+      .mockResolvedValueOnce(jsonResponse({ alias: 'generated1', url: 'https://example.com', usageCount: 0 }, 201))
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(<App />)
+    await screen.findByText('No links yet. Create one above to get started.')
+    fireEvent.change(screen.getByLabelText('Destination URL'), { target: { value: 'https://example.com' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Create short link' }))
+
+    expect(await screen.findByRole('heading', { name: 'generated1' })).toBeInTheDocument()
+    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/links', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url: 'https://example.com' }),
+    })
+    expect(await screen.findByRole('status')).toHaveTextContent(`${window.location.origin}/generated1`)
+  })
+
+  it('creates a link with a custom alias', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse([]))
+      .mockResolvedValueOnce(jsonResponse({ alias: 'my-link', url: 'https://example.com/page', usageCount: 0 }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(<App />)
+    await screen.findByText('No links yet. Create one above to get started.')
+    fireEvent.change(screen.getByLabelText('Destination URL'), { target: { value: 'https://example.com/page' } })
+    fireEvent.change(screen.getByLabelText(/Custom alias/), { target: { value: 'my-link' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Create short link' }))
+
+    expect(await screen.findByRole('heading', { name: 'my-link' })).toBeInTheDocument()
+    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/links', expect.objectContaining({
+      method: 'POST',
+      body: JSON.stringify({ url: 'https://example.com/page', alias: 'my-link' }),
+    }))
+  })
+
+  it('copies a short URL and confirms deletion before removing the link', async () => {
+    const writeText = setupClipboard()
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse([link]))
+      .mockResolvedValueOnce(new Response(null, { status: 204 }))
+    vi.stubGlobal('fetch', fetchMock)
+    const confirm = vi.fn().mockReturnValueOnce(false).mockReturnValueOnce(true)
+    vi.stubGlobal('confirm', confirm)
+
+    render(<App />)
+    const item = await screen.findByRole('heading', { name: 'docs' }).then((heading) => heading.closest('li'))
+    expect(item).not.toBeNull()
+    fireEvent.click(within(item as HTMLElement).getByRole('button', { name: 'Copy' }))
+    const shortUrl = `${window.location.origin}/docs`
+    expect(await screen.findByRole('status')).toHaveTextContent(`Copied ${shortUrl} to clipboard`)
+    expect(writeText).toHaveBeenCalledWith(shortUrl)
+
+    fireEvent.click(within(item as HTMLElement).getByRole('button', { name: 'Delete' }))
+    expect(confirm).toHaveBeenCalledWith('Delete the short link “docs”? This cannot be undone.')
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+
+    fireEvent.click(within(item as HTMLElement).getByRole('button', { name: 'Delete' }))
+    expect(await screen.findByText('Deleted short link “docs”.')).toBeInTheDocument()
+    expect(fetchMock).toHaveBeenLastCalledWith('/api/links/docs', { method: 'DELETE' })
+    expect(screen.queryByRole('heading', { name: 'docs' })).not.toBeInTheDocument()
+  })
+
+  it('falls back to a temporary textarea when the clipboard API rejects the copy', async () => {
+    const writeText = setupClipboard()
+    writeText.mockRejectedValueOnce(new Error('Clipboard unavailable'))
+    const previousExecCommand = Object.getOwnPropertyDescriptor(document, 'execCommand')
+    let copiedText = ''
+    const execCommand = vi.fn(() => {
+      copiedText = document.querySelector('textarea')?.value ?? ''
+      return true
+    })
+    Object.defineProperty(document, 'execCommand', { configurable: true, value: execCommand })
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse([link])))
+    const view = render(<App />)
+
+    try {
+      const shortUrl = `${window.location.origin}/docs`
+      const item = await screen.findByRole('heading', { name: 'docs' }).then((heading) => heading.closest('li'))
+      fireEvent.click(within(item as HTMLElement).getByRole('button', { name: 'Copy' }))
+
+      expect(await screen.findByRole('status')).toHaveTextContent(`Copied ${shortUrl} to clipboard`)
+      expect(writeText).toHaveBeenCalledWith(shortUrl)
+      expect(execCommand).toHaveBeenCalledWith('copy')
+      expect(copiedText).toBe(shortUrl)
+      expect(document.querySelector('textarea')).not.toBeInTheDocument()
+    } finally {
+      view.unmount()
+      if (previousExecCommand) {
+        Object.defineProperty(document, 'execCommand', previousExecCommand)
+      } else {
+        Reflect.deleteProperty(document, 'execCommand')
+      }
+    }
+  })
+
+  it('disables creation after the initial list load fails and allows retrying', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ error: 'Storage unavailable' }, 503))
+      .mockResolvedValueOnce(jsonResponse([]))
     vi.stubGlobal('fetch', fetchMock)
 
     render(<App />)
 
-    expect(screen.getByRole('heading', { name: 'Multi-Agent Playground' })).toBeInTheDocument()
-    expect(await screen.findByText('Backend status: ok')).toBeInTheDocument()
-    expect(fetchMock).toHaveBeenCalledWith('/api/health', {
-      signal: expect.any(AbortSignal),
-    })
+    expect(await screen.findByRole('alert')).toHaveTextContent('Storage unavailable')
+    const createButton = screen.getByRole('button', { name: 'Create short link' })
+    expect(createButton).toBeDisabled()
+    fireEvent.change(screen.getByLabelText('Destination URL'), { target: { value: 'https://example.com' } })
+    fireEvent.click(createButton)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(fetchMock).toHaveBeenCalledWith('/api/links', { signal: expect.any(AbortSignal) })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }))
+    expect(await screen.findByText('No links yet. Create one above to get started.')).toBeInTheDocument()
+    expect(createButton).toBeEnabled()
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(fetchMock).toHaveBeenLastCalledWith('/api/links', { signal: expect.any(AbortSignal) })
   })
 
-  it('displays a useful error when the backend is unavailable', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('Failed to fetch')))
+  it('reports create and delete errors without removing existing links', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse([link]))
+      .mockResolvedValueOnce(jsonResponse({ error: 'Alias already exists' }, 409))
+      .mockResolvedValueOnce(jsonResponse({ error: 'Not found' }, 404))
+    vi.stubGlobal('fetch', fetchMock)
+    vi.stubGlobal('confirm', vi.fn().mockReturnValue(true))
 
     render(<App />)
+    await screen.findByRole('heading', { name: 'docs' })
+    fireEvent.change(screen.getByLabelText('Destination URL'), { target: { value: 'https://another.example' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Create short link' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('Alias already exists')
 
-    expect(await screen.findByRole('alert')).toHaveTextContent(
-      'Check that the backend is running and refresh the page',
-    )
-  })
-
-  it.each([
-    new Response(null, { status: 503 }),
-    new Response(JSON.stringify({ status: 'unexpected' })),
-    new Response('not JSON'),
-  ])('displays an error for an unsuccessful or invalid response (%#)', async (response) => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response))
-
-    render(<App />)
-
-    expect(await screen.findByRole('alert')).toHaveTextContent('Unable to reach a healthy backend')
+    fireEvent.click(within(screen.getByRole('listitem')).getByRole('button', { name: 'Delete' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('Not found')
+    expect(screen.getByRole('heading', { name: 'docs' })).toBeInTheDocument()
   })
 })

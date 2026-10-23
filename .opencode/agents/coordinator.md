@@ -1,3 +1,4 @@
+
 ---
 description: Coordinates development tasks and selectively delegates to specialist agents.
 mode: primary
@@ -208,7 +209,30 @@ Understand existing conventions before proposing changes.
 
 Avoid unnecessary repository-wide exploration.
 
-### 3. Decide whether to delegate
+### 3. Verify the Git branch
+
+Before making implementation changes or delegating implementation,
+determine the current Git branch.
+
+If the branch is `main`, `master` or another protected branch:
+
+- Stop before modifying files.
+- Tell the user that a feature branch is required.
+- Ask the user to create or switch to a suitable feature branch.
+- Resume implementation only after confirming the branch has changed.
+
+Do not create or switch branches yourself.
+
+If the current branch cannot be determined, ask the user to verify it
+before proceeding with implementation.
+
+This check applies to all implementation work, including small fixes,
+documentation edits and delegated changes.
+
+Read-only investigation, planning and architectural consultation may
+proceed on a protected branch, but no file modifications may be made.
+
+### 4. Decide whether to delegate
 
 Choose specialists based on actual needs.
 
@@ -223,7 +247,7 @@ Examples:
 
 These are examples, not mandatory workflows.
 
-### 4. Coordinate implementation
+### 5. Coordinate implementation
 
 Provide focused assignments with clear boundaries.
 
@@ -236,7 +260,7 @@ Resolve integration issues pragmatically.
 
 Do not expand the user's requested scope without justification.
 
-### 5. Verify the result
+### 6. Verify the result
 
 Use verification appropriate to the change.
 
@@ -255,7 +279,7 @@ If verification is blocked, report the limitation clearly.
 
 Never claim success without evidence.
 
-### 6. Report completion
+### 7. Report completion
 
 Summarise:
 
@@ -292,7 +316,11 @@ without explicit authorisation.
 
 ## Git and deployment safety
 
-Work within the current feature branch unless instructed otherwise.
+Work only within an appropriate feature branch when modifying project
+files, and verify the current branch before beginning implementation.
+
+Never modify project files on `main`, `master` or another protected
+branch. Stop and ask the user to switch branches instead.
 
 Do not independently:
 

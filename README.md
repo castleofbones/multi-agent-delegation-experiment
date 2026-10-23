@@ -55,8 +55,8 @@ AGENTS.md                       Shared engineering and collaboration principles
 opencode.jsonc                  Project-local OpenCode configuration
 package.json / package-lock.json Workspace commands and single dependency lockfile
 tsconfig.base.json              Shared TypeScript checks
-frontend/                       React page, Vite proxy and UI tests
-backend/                        Express health API and HTTP test
+frontend/                      React page, Vite proxy and UI tests
+backend/                       Express health/link API and HTTP tests
 ```
 
 ## Prerequisites and installation
@@ -113,7 +113,25 @@ Express currently listens on `127.0.0.1:3001` by default.
 { "status": "ok", "service": "backend" }
 ```
 
-The frontend fetches the relative URL `/api/health`.
+`POST /api/links` creates a link from a JSON body containing a `url` and an
+optional `alias`:
+
+```json
+{ "url": "https://example.com/somewhere", "alias": "my-link" }
+```
+
+Aliases may contain ASCII letters, digits, hyphens and underscores; they are
+case-sensitive. If omitted, an alias is generated. The endpoint returns HTTP 201
+with the alias, URL and initial `usageCount` of `0`; invalid input returns 400,
+and duplicate custom aliases return 409. The reserved aliases `api`, `health`
+and `links` cannot be used.
+
+Links are stored in SQLite at `data/links.sqlite` relative to the backend's
+working directory. Set `LINKS_DATABASE_PATH` to override the database file path.
+
+The frontend fetches the relative URL `/api/health`. Vite's **development**
+proxy forwards `/api` to Express, so no CORS setup is needed. Requests time out
+after five seconds and failures are shown on the page.
 
 Vite's **development** proxy forwards `/api` to Express, so no CORS setup is
 needed. Requests time out after five seconds and failures are shown on the page.

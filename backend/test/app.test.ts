@@ -67,6 +67,54 @@ test('creates a link and stores its destination and initial usage count', async 
   )
 })
 
+test('redirects to the stored destination with HTTP 302', async (t) => {
+  const api = await startApp()
+  t.after(api.close)
+  api.database.prepare(
+    'INSERT INTO links (alias, destination_url) VALUES (?, ?)',
+  ).run('go-there', 'https://destination.example/path?value=1')
+
+  const response = await fetch(`${api.url}/go-there`, { redirect: 'manual' })
+
+  assert.equal(response.status, 302)
+  assert.equal(response.headers.get('location'), 'https://destination.example/path?value=1')
+})
+
+test('increments usage count for each redirect, including concurrent requests', async (t) => {
+  const api = await startApp()
+  t.after(api.close)
+  api.database.prepare(
+    'INSERT INTO links (alias, destination_url) VALUES (?, ?)',
+  ).run('counted', 'https://destination.example')
+
+  const responses = await Promise.all(
+    Array.from({ length: 10 }, () => fetch(`${api.url}/counted`, { redirect: 'manual' })),
+  )
+
+  assert.deepEqual(responses.map((response) => response.status), Array(10).fill(302))
+  assert.equal(
+    api.database.prepare('SELECT usage_count FROM links WHERE alias = ?').get('counted')?.usage_count,
+    10,
+  )
+})
+
+test('returns 404 for unknown aliases and preserves case-sensitive lookup', async (t) => {
+  const api = await startApp()
+  t.after(api.close)
+  api.database.prepare(
+    'INSERT INTO links (alias, destination_url) VALUES (?, ?)',
+  ).run('MixedCase', 'https://destination.example')
+
+  const missing = await fetch(`${api.url}/missing`, { redirect: 'manual' })
+  const wrongCase = await fetch(`${api.url}/mixedcase`, { redirect: 'manual' })
+  const exact = await fetch(`${api.url}/MixedCase`, { redirect: 'manual' })
+
+  assert.equal(missing.status, 404)
+  assert.equal(wrongCase.status, 404)
+  assert.equal(exact.status, 302)
+  assert.equal(exact.headers.get('location'), 'https://destination.example')
+})
+
 test('rejects invalid request bodies, URLs and custom aliases', async (t) => {
   const api = await startApp()
   t.after(api.close)
@@ -167,13 +215,17 @@ test('persists created links across database connections', async (t) => {
     body: JSON.stringify({ url: 'https://persist.example' }),
   })
   assert.equal(response.status, 201)
+  const firstRedirect = await fetch(`${api.url}/persistent`, { redirect: 'manual' })
+  const secondRedirect = await fetch(`${api.url}/persistent`, { redirect: 'manual' })
+  assert.equal(firstRedirect.status, 302)
+  assert.equal(secondRedirect.status, 302)
   await api.close()
 
   const reopenedDatabase = new DatabaseSync(databasePath)
   try {
     assert.deepEqual(
       { ...reopenedDatabase.prepare('SELECT alias, destination_url, usage_count FROM links').get() },
-      { alias: 'persistent', destination_url: 'https://persist.example', usage_count: 0 },
+      { alias: 'persistent', destination_url: 'https://persist.example', usage_count: 2 },
     )
   } finally {
     reopenedDatabase.close()

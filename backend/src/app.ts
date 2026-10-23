@@ -60,12 +60,26 @@ export function createApp(database: DatabaseSync, aliasGenerator: AliasGenerator
   const insertLink = database.prepare(
     'INSERT INTO links (alias, destination_url, usage_count) VALUES (?, ?, 0)',
   )
+  const incrementAndGetLink = database.prepare(
+    'UPDATE links SET usage_count = usage_count + 1 WHERE alias = ? RETURNING destination_url',
+  )
   const app = express()
   app.disable('x-powered-by')
   app.use(express.json())
 
   app.get('/api/health', (_request, response) => {
     response.json({ status: 'ok', service: 'backend' })
+  })
+
+  app.get('/:alias', (request, response) => {
+    const link = incrementAndGetLink.get(request.params.alias)
+
+    if (typeof link?.destination_url !== 'string') {
+      response.status(404).json({ error: 'Not found' })
+      return
+    }
+
+    response.redirect(302, link.destination_url)
   })
 
   app.post('/api/links', (request, response, next) => {

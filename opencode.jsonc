@@ -1,0 +1,15 @@
+
+{
+  "$schema": "https://opencode.ai/config.json",
+  "model": "openrouter/luna-floor",
+  "providers": {
+    "openrouter": {
+      "models": {
+        "luna-floor": {
+          "modelID": "openai/gpt-6-luna:floor",
+          "name": "GPT-6 Luna (Floor Routing)"
+        }
+      }
+    }
+  }
+}

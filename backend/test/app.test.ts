@@ -67,6 +67,53 @@ test('creates a link and stores its destination and initial usage count', async 
   )
 })
 
+test('lists saved links with usage counts in deterministic alias order', async (t) => {
+  const api = await startApp()
+  t.after(api.close)
+
+  for (const link of [
+    { alias: 'z-last', url: 'https://last.example' },
+    { alias: 'A-first', url: 'https://first.example' },
+  ]) {
+    const response = await fetch(`${api.url}/api/links`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(link),
+    })
+    assert.equal(response.status, 201)
+  }
+  await fetch(`${api.url}/z-last`, { redirect: 'manual' })
+  await fetch(`${api.url}/z-last`, { redirect: 'manual' })
+
+  const response = await fetch(`${api.url}/api/links`)
+
+  assert.equal(response.status, 200)
+  assert.deepEqual(await response.json(), [
+    { alias: 'A-first', url: 'https://first.example', usageCount: 0 },
+    { alias: 'z-last', url: 'https://last.example', usageCount: 2 },
+  ])
+})
+
+test('deletes a link with HTTP 204 and returns 404 for an unknown alias', async (t) => {
+  const api = await startApp()
+  t.after(api.close)
+  const createResponse = await fetch(`${api.url}/api/links`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ url: 'https://delete.example', alias: 'remove-me' }),
+  })
+  assert.equal(createResponse.status, 201)
+
+  const deleted = await fetch(`${api.url}/api/links/remove-me`, { method: 'DELETE' })
+  assert.equal(deleted.status, 204)
+  assert.equal(await deleted.text(), '')
+  assert.deepEqual(await (await fetch(`${api.url}/api/links`)).json(), [])
+
+  const missing = await fetch(`${api.url}/api/links/unknown`, { method: 'DELETE' })
+  assert.equal(missing.status, 404)
+  assert.deepEqual(await missing.json(), { error: 'Not found' })
+})
+
 test('redirects to the stored destination with HTTP 302', async (t) => {
   const api = await startApp()
   t.after(api.close)

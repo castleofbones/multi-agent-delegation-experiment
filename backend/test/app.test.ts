@@ -45,6 +45,16 @@ test('health endpoint returns HTTP 200 and identifies the backend', async (t) =>
   assert.deepEqual(await response.json(), { status: 'ok', service: 'backend' })
 })
 
+test('unknown API routes return the JSON not-found response', async (t) => {
+  const api = await startApp()
+  t.after(api.close)
+
+  const response = await fetch(`${api.url}/api/unknown`)
+
+  assert.equal(response.status, 404)
+  assert.deepEqual(await response.json(), { error: 'Not found' })
+})
+
 test('creates a link and stores its destination and initial usage count', async (t) => {
   const api = await startApp()
   t.after(api.close)
@@ -176,6 +186,7 @@ test('rejects invalid request bodies, URLs and custom aliases', async (t) => {
     { url: 'https://example.com', alias: 'has space' },
     { url: 'https://example.com', alias: 'non-ASCII-é' },
     { url: 'https://example.com', alias: 'api' },
+    { url: 'https://example.com', alias: 'assets' },
     { url: 'https://example.com', alias: 'health' },
   ]
 

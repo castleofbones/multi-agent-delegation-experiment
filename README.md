@@ -11,17 +11,15 @@ correct software without unnecessary coordination or engineering complexity.
 
 ## Project status
 
-**Foundation complete; URL-shortener implementation pending.**
+**URL shortener implemented; Docker packaging is prepared and awaiting container verification.**
 
-The repository currently provides a working React/Vite frontend, Node.js/Express
-backend, TypeScript configuration, npm workspaces, health endpoint and tests.
+The repository provides a React/Vite frontend, Node.js/Express backend,
+TypeScript configuration, npm workspaces, SQLite persistence, URL management
+API/UI, health endpoint, tests and a single-container Docker Compose deployment.
 
-URL creation, redirects, usage counters, SQLite persistence, the management
-interface and Docker deployment are planned features, not yet implemented.
+## Functionality
 
-## Planned functionality
-
-The initial release will support:
+The application supports:
 
 - Creating shortened links with automatically generated aliases.
 - Creating shortened links with custom aliases.
@@ -33,7 +31,7 @@ The initial release will support:
 - Deleting links with confirmation.
 - Persisting links and counters across restarts.
 
-Aliases will be case-sensitive and support letters, digits, hyphens and
+Aliases are case-sensitive and support letters, digits, hyphens and
 underscores.
 
 The initial release will not include authentication, public internet hosting,
@@ -46,7 +44,7 @@ TypeScript throughout, React with Vite, Node.js with Express, and npm workspaces
 Frontend tests use Vitest and Testing Library; backend tests use Node's
 built-in test runner.
 
-SQLite is planned for persistence, with Docker Compose used for deployment.
+SQLite persists links and usage counts; Docker Compose provides the single-container deployment.
 
 ```text
 AGENTS.md                       Shared engineering and collaboration principles
@@ -74,9 +72,8 @@ npm run dev
 
 Open <http://localhost:5173> (or the URL Vite prints if that port is occupied).
 
-The current scaffold page displays loading, backend health, or an actionable
-error message. It will be replaced by the URL-shortener management interface
-during implementation.
+The development frontend provides the short-link creation and management
+interface; production serves the same built frontend and API from Express.
 
 ## Commands
 
@@ -129,12 +126,9 @@ and `links` cannot be used.
 Links are stored in SQLite at `data/links.sqlite` relative to the backend's
 working directory. Set `LINKS_DATABASE_PATH` to override the database file path.
 
-The frontend fetches the relative URL `/api/health`. Vite's **development**
-proxy forwards `/api` to Express, so no CORS setup is needed. Requests time out
-after five seconds and failures are shown on the page.
-
-Vite's **development** proxy forwards `/api` to Express, so no CORS setup is
-needed. Requests time out after five seconds and failures are shown on the page.
+The frontend uses relative `/api` requests. Vite's **development** proxy forwards
+API and short-link requests to Express, so no CORS setup is needed. Production
+serves the compiled frontend and API from the same Express origin.
 
 Set `PORT` to change the backend port. The Vite development proxy reads the
 same variable; supply it to both processes (for example,
@@ -149,13 +143,10 @@ curl http://localhost:5173/api/health
 
 The proxy is development-only. Static preview does not proxy API requests.
 
-Production serving will be updated to provide the compiled frontend, API
-and redirects from the same Express origin.
+Set `HOST` to change the backend bind address; Docker sets it to `0.0.0.0` so
+the service can receive traffic through its published container port.
 
-The backend's current localhost-only binding will also need to be made
-configurable for Docker deployment.
-
-## Planned HTTP API
+## HTTP API
 
 | Method | Endpoint | Purpose |
 | --- | --- | --- |
@@ -165,7 +156,8 @@ configurable for Docker deployment.
 | `DELETE` | `/api/links/:alias` | Delete a link |
 | `GET` | `/:alias` | Redirect and increment usage count |
 
-The URL-shortener endpoints are planned and are not yet available.
+The URL-shortener endpoints are available; successful redirects use HTTP 302,
+and unknown aliases return 404.
 
 ## Development and deployment
 
@@ -173,18 +165,79 @@ Development takes place on **Charon**, using WSL Ubuntu.
 
 Deployment targets a **Raspberry Pi 5** running Linux ARM64 and Docker.
 
-The intended production arrangement is:
+The production arrangement uses one Docker Compose application container for
+Express, the compiled frontend, API and short-link redirects. The image uses
+Node.js 24 (including the official ARM64-compatible Debian slim image), installs
+backend production dependencies only, and runs as the non-root `node` user.
 
-- One Docker Compose application service.
-- One HTTP origin for the frontend, API and redirects.
-- SQLite storage persisted outside the container.
-- SQLite data preferably stored on the Pi's local SSD.
-- A configurable published port and short-link base URL.
-- An application health check and appropriate restart policy.
-- LAN-only access, without public internet exposure.
+### Build and run with Docker Compose
 
-Docker packaging and deployment instructions will be added when implemented
-and verified.
+Docker Engine and the Compose plugin are required. From a checkout on the Pi,
+create a local `.env` file in the repository root (it is git-ignored):
+
+```dotenv
+# Use the Pi's LAN address, ideally one reserved in the router. Do not use 0.0.0.0.
+LAN_BIND_ADDRESS=192.168.1.20
+PORT=3001
+# A directory on the Pi's local SSD, outside this checkout.
+DATA_DIR=/mnt/ssd/multi-agent-playground
+```
+
+Use the actual LAN address and SSD mount path for your Pi. The bind address is
+required by Compose, so Docker cannot silently publish the service on every host
+interface. A LAN bind does not replace appropriate host/router firewall rules;
+do not forward this port from the internet.
+
+The container listens on `PORT` (default `3001`) and binds to
+`0.0.0.0` inside the container. Compose publishes that port only on
+`LAN_BIND_ADDRESS`. Open the app using that LAN address and port; the frontend
+uses the current site origin when displaying and copying short links. The app
+also receives `LINKS_DATABASE_PATH=/data/links.sqlite` by default. You can
+override it, but keep the database file under `/data` so it remains on the
+persistent SSD mount.
+
+Prepare the persistent directory for the image's `node` user (UID 1000 in the
+official Node image), then build and start the service:
+
+```sh
+sudo mkdir -p /mnt/ssd/multi-agent-playground
+sudo chown 1000:1000 /mnt/ssd/multi-agent-playground
+docker compose up -d --build
+docker compose ps
+```
+
+The SQLite file is stored at
+`$DATA_DIR/links.sqlite` on the host and mounted at `/data` in the container.
+It survives container replacement and image updates. Keep this directory on a
+local SSD filesystem rather than a network share. Back it up before upgrades
+or other maintenance that could affect the host storage.
+
+Check health and access from a LAN client:
+
+```sh
+docker compose logs app
+curl http://192.168.1.20:3001/api/health
+```
+
+The image health check calls `/api/health`; Compose restarts the service unless
+it is explicitly stopped. To update after pulling changes, run
+`docker compose up -d --build` again. `docker compose down` removes the
+container but leaves the host data directory intact.
+
+### Portainer deployment
+
+For Portainer, create a Stack from the Git repository (or use a Pi-local
+checkout), set the Compose file path to `docker-compose.yml`, and provide the
+same three variables (`LAN_BIND_ADDRESS`, `PORT`, and `DATA_DIR`) in the
+stack's environment-variable settings. The Git/checkout
+context must include the Dockerfile and both workspaces so Portainer can build
+the image on the Pi. Create the SSD data directory and assign it to UID 1000
+as above before deploying. Review the published binding and volume path in the
+stack before starting it.
+
+Using a native build on the Raspberry Pi builds the Node dependencies and
+application for its ARM64 architecture; no cross-compilation or external image
+registry is needed. Docker/Compose are not required for normal development.
 
 ## Multi-agent experiment
 

@@ -1,0 +1,13 @@
+services:
+  app:
+    build: .
+    restart: unless-stopped
+    stop_grace_period: 10s
+    environment:
+      HOST: 0.0.0.0
+      PORT: ${PORT:-3001}
+      LINKS_DATABASE_PATH: ${LINKS_DATABASE_PATH:-/data/links.sqlite}
+    ports:
+      - "${LAN_BIND_ADDRESS:?Set LAN_BIND_ADDRESS to the Pi LAN address}:${PORT:-3001}:${PORT:-3001}"
+    volumes:
+      - "${DATA_DIR:?Set DATA_DIR to a directory on the Pi local SSD}:/data"

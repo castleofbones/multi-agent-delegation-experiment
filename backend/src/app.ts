@@ -1,10 +1,12 @@
 import { randomInt } from 'node:crypto'
+import { dirname, resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import express from 'express'
 import type { ErrorRequestHandler } from 'express'
 import type { DatabaseSync } from 'node:sqlite'
 
 const aliasCharacters = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'
-const reservedAliases = new Set(['api', 'health', 'links'])
+const reservedAliases = new Set(['api', 'assets', 'health', 'links'])
 const aliasLength = 8
 const maxAliasAttempts = 10
 
@@ -94,17 +96,6 @@ export function createApp(database: DatabaseSync, aliasGenerator: AliasGenerator
     response.status(204).end()
   })
 
-  app.get('/:alias', (request, response) => {
-    const link = incrementAndGetLink.get(request.params.alias)
-
-    if (typeof link?.destination_url !== 'string') {
-      response.status(404).json({ error: 'Not found' })
-      return
-    }
-
-    response.redirect(302, link.destination_url)
-  })
-
   app.post('/api/links', (request, response, next) => {
     const input: unknown = request.body
     if (!isRecord(input)) {
@@ -152,6 +143,30 @@ export function createApp(database: DatabaseSync, aliasGenerator: AliasGenerator
     }
 
     next(new Error('Unable to generate a unique alias'))
+  })
+
+  app.use('/api', (_request, response) => {
+    response.status(404).json({ error: 'Not found' })
+  })
+
+  if (process.env.NODE_ENV === 'production') {
+    const frontendDistPath = resolve(
+      dirname(fileURLToPath(import.meta.url)),
+      '../../frontend/dist',
+    )
+    app.use(express.static(frontendDistPath))
+  }
+
+  // Do not add a catch-all SPA fallback: unknown aliases must remain 404s.
+  app.get('/:alias', (request, response) => {
+    const link = incrementAndGetLink.get(request.params.alias)
+
+    if (typeof link?.destination_url !== 'string') {
+      response.status(404).json({ error: 'Not found' })
+      return
+    }
+
+    response.redirect(302, link.destination_url)
   })
 
   app.use((_request, response) => {

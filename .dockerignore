@@ -1,0 +1,13 @@
+node_modules
+**/node_modules
+**/dist
+.git
+.github
+.opencode
+coverage
+**/coverage
+*.log
+.env
+.env.*
+!.env.example
+data

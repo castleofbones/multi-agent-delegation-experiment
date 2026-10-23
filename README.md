@@ -1,8 +1,8 @@
 # Multi-Agent Playground
 
 A personal hobby project for experimenting with multi-agent AI software
-development. No application has been selected: this repository is only a minimal
-working frontend/backend foundation.
+development. The application is a small URL shortener, built on a minimal
+frontend/backend foundation.
 
 ## Stack and structure
 
@@ -15,7 +15,7 @@ AGENTS.md                       Shared engineering and collaboration principles
 package.json / package-lock.json Workspace commands and single dependency lockfile
 tsconfig.base.json              Shared TypeScript checks
 frontend/                      React page, Vite proxy and UI tests
-backend/                       Express health API and HTTP test
+backend/                       Express health/link API and HTTP tests
 ```
 
 ## Prerequisites and installation
@@ -66,6 +66,22 @@ Express listens on `127.0.0.1:3001` by default.
 ```json
 { "status": "ok", "service": "backend" }
 ```
+
+`POST /api/links` creates a link from a JSON body containing a `url` and an
+optional `alias`:
+
+```json
+{ "url": "https://example.com/somewhere", "alias": "my-link" }
+```
+
+Aliases may contain ASCII letters, digits, hyphens and underscores; they are
+case-sensitive. If omitted, an alias is generated. The endpoint returns HTTP 201
+with the alias, URL and initial `usageCount` of `0`; invalid input returns 400,
+and duplicate custom aliases return 409. The reserved aliases `api`, `health`
+and `links` cannot be used.
+
+Links are stored in SQLite at `data/links.sqlite` relative to the backend's
+working directory. Set `LINKS_DATABASE_PATH` to override the database file path.
 
 The frontend fetches the relative URL `/api/health`. Vite's **development**
 proxy forwards `/api` to Express, so no CORS setup is needed. Requests time out

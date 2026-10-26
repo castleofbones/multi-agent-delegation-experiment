@@ -63,6 +63,13 @@ function App() {
   const [saving, setSaving] = useState(false)
   const [actionError, setActionError] = useState('')
   const [feedback, setFeedback] = useState('')
+  const [searchQuery, setSearchQuery] = useState('')
+  const normalizedQuery = searchQuery.trim().toLowerCase()
+  const filteredLinks = normalizedQuery
+    ? links.filter((link) =>
+        link.alias.toLowerCase().includes(normalizedQuery) || link.url.toLowerCase().includes(normalizedQuery),
+      )
+    : links
 
   useEffect(() => {
     const controller = new AbortController()
@@ -216,6 +223,24 @@ function App() {
         </div>
 
         {loading && <p className="panel state-message" role="status">Loading your links…</p>}
+        {!loading && !listError && (
+          <div className="search-controls">
+            <label className="search-field">
+              <span>Search links</span>
+              <input
+                type="search"
+                value={searchQuery}
+                onChange={(event) => setSearchQuery(event.target.value)}
+                placeholder="Search by alias or destination URL"
+              />
+            </label>
+            {searchQuery && (filteredLinks.length > 0 || links.length === 0) && (
+              <button className="secondary-button" type="button" onClick={() => setSearchQuery('')}>
+                Clear search
+              </button>
+            )}
+          </div>
+        )}
         {!loading && listError && (
           <>
             <p className="panel message error" role="alert">{listError}</p>
@@ -231,9 +256,17 @@ function App() {
         {!loading && !listError && links.length === 0 && (
           <p className="panel state-message">No links yet. Create one above to get started.</p>
         )}
-        {!loading && !listError && links.length > 0 && (
+        {!loading && !listError && links.length > 0 && filteredLinks.length === 0 && (
+          <div className="panel state-message no-match-state">
+            <p>No links match “{searchQuery.trim()}”.</p>
+            <button className="secondary-button" type="button" onClick={() => setSearchQuery('')}>
+              Clear search
+            </button>
+          </div>
+        )}
+        {!loading && !listError && filteredLinks.length > 0 && (
           <ul className="link-list">
-            {links.map((link) => {
+            {filteredLinks.map((link) => {
               const shortUrl = `${window.location.origin}/${encodeURIComponent(link.alias)}`
               return (
                 <li className="panel link-card" key={link.alias}>

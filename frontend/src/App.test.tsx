@@ -193,4 +193,110 @@ describe('link dashboard', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent('Not found')
     expect(screen.getByRole('heading', { name: 'docs' })).toBeInTheDocument()
   })
+
+  it('filters links by alias as the query is typed', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse([
+      link,
+      { alias: 'blog', url: 'https://example.com/articles', usageCount: 2 },
+    ])))
+    render(<App />)
+    await screen.findByRole('heading', { name: 'docs' })
+
+    fireEvent.change(screen.getByRole('searchbox', { name: 'Search links' }), { target: { value: 'blo' } })
+
+    expect(screen.getByRole('heading', { name: 'blog' })).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'docs' })).not.toBeInTheDocument()
+
+    const search = screen.getByRole('searchbox', { name: 'Search links' })
+    fireEvent.change(search, { target: { value: '' } })
+    expect(screen.getByRole('heading', { name: 'blog' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'docs' })).toBeInTheDocument()
+    expect(search).toHaveValue('')
+  })
+
+  it('filters links by destination URL', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse([
+      link,
+      { alias: 'blog', url: 'https://news.example/articles', usageCount: 2 },
+    ])))
+    render(<App />)
+    await screen.findByRole('heading', { name: 'docs' })
+
+    fireEvent.change(screen.getByRole('searchbox', { name: 'Search links' }), { target: { value: 'news.example' } })
+
+    expect(screen.getByRole('heading', { name: 'blog' })).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'docs' })).not.toBeInTheDocument()
+  })
+
+  it('matches alias and destination queries without case sensitivity', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse([link])))
+    render(<App />)
+    await screen.findByRole('heading', { name: 'docs' })
+    const search = screen.getByRole('searchbox', { name: 'Search links' })
+
+    fireEvent.change(search, { target: { value: 'DOCS' } })
+    expect(screen.getByRole('heading', { name: 'docs' })).toBeInTheDocument()
+    fireEvent.change(search, { target: { value: 'EXAMPLE.COM/DOCS' } })
+    expect(screen.getByRole('heading', { name: 'docs' })).toBeInTheDocument()
+  })
+
+  it('shows a no-match state with a clear action and restores all links', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse([
+      link,
+      { alias: 'blog', url: 'https://example.com/articles', usageCount: 2 },
+    ])))
+    render(<App />)
+    await screen.findByRole('heading', { name: 'docs' })
+    const search = screen.getByRole('searchbox', { name: 'Search links' })
+    fireEvent.change(search, { target: { value: 'missing' } })
+
+    expect(screen.getByText('No links match “missing”.')).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'docs' })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Clear search' }))
+    expect(screen.getByRole('heading', { name: 'docs' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'blog' })).toBeInTheDocument()
+    expect(search).toHaveValue('')
+  })
+
+  it('keeps the active filter when creating a link and includes a matching result', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse([link]))
+      .mockResolvedValueOnce(jsonResponse({ alias: 'new-docs', url: 'https://example.com/new', usageCount: 0 }, 201))
+    vi.stubGlobal('fetch', fetchMock)
+    render(<App />)
+    await screen.findByRole('heading', { name: 'docs' })
+    const search = screen.getByRole('searchbox', { name: 'Search links' })
+    fireEvent.change(search, { target: { value: 'new-docs' } })
+    expect(screen.getByText('No links match “new-docs”.')).toBeInTheDocument()
+
+    fireEvent.change(screen.getByLabelText('Destination URL'), { target: { value: 'https://example.com/new' } })
+    fireEvent.change(screen.getByLabelText(/Custom alias/), { target: { value: 'new-docs' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Create short link' }))
+
+    expect(await screen.findByRole('heading', { name: 'new-docs' })).toBeInTheDocument()
+    expect(search).toHaveValue('new-docs')
+    expect(screen.queryByRole('heading', { name: 'docs' })).not.toBeInTheDocument()
+  })
+
+  it('keeps the active filter after deleting a matching link', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse([
+        link,
+        { alias: 'blog', url: 'https://example.com/articles', usageCount: 2 },
+      ]))
+      .mockResolvedValueOnce(new Response(null, { status: 204 }))
+    vi.stubGlobal('fetch', fetchMock)
+    vi.stubGlobal('confirm', vi.fn().mockReturnValue(true))
+    render(<App />)
+    await screen.findByRole('heading', { name: 'docs' })
+    const search = screen.getByRole('searchbox', { name: 'Search links' })
+    fireEvent.change(search, { target: { value: 'docs' } })
+    fireEvent.click(within(screen.getByRole('listitem')).getByRole('button', { name: 'Delete' }))
+
+    expect(await screen.findByText('No links match “docs”.')).toBeInTheDocument()
+    expect(search).toHaveValue('docs')
+    fireEvent.click(screen.getByRole('button', { name: 'Clear search' }))
+    expect(screen.getByRole('heading', { name: 'blog' })).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'docs' })).not.toBeInTheDocument()
+  })
 })

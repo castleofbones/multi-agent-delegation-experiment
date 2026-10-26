@@ -160,7 +160,11 @@ configuration or persistent production data.
 Delegate independent review when changes have meaningful correctness,
 regression, security or maintainability risks.
 
-Provide the relevant changes, requirements and context.
+Provide the intended behaviour, changed files, relevant diff or other
+accessible equivalent, and available verification results. Ask for review
+of integrated changes rather than repeatedly reviewing incomplete snapshots.
+If the reviewer cannot access required evidence, correct the handoff; do not
+count an evidence-blocked review as completed.
 
 Expect evidence-based findings with proportionate severity.
 
@@ -195,6 +199,11 @@ Identify:
 - Acceptance criteria.
 - Important constraints.
 - Potential integration dependencies.
+
+For work crossing component boundaries, identify concise, observable
+integration acceptance criteria before delegating implementation. Cover the
+relevant end-to-end behaviour at those boundaries, keep criteria proportional
+to the task, and avoid unrelated full-system requirements.
 
 Ask the user for clarification only when an ambiguity materially
 affects implementation.
@@ -262,20 +271,30 @@ Do not expand the user's requested scope without justification.
 
 ### 6. Verify the result
 
-Use verification appropriate to the change.
+Before environment-dependent work, verify the actual execution host,
+operating system and architecture, and the availability and versions of
+relevant tools. Do not assume the local environment matches the target.
 
-Consider:
+Use verification appropriate to the change. Consider:
 
 - Relevant automated tests.
 - Typechecking and builds.
 - API contract consistency.
 - Frontend and backend integration.
-- Container builds and configuration when relevant.
+- Container configuration and image builds when relevant.
 - Independent review for meaningful changes.
 
-Distinguish checks actually executed from checks merely recommended.
+When a task crosses component boundaries, verify the relevant integrated
+behaviour against its acceptance criteria, not only the individual components.
 
-If verification is blocked, report the limitation clearly.
+For Docker changes, distinguish static inspection or rendered Compose
+configuration from an actual image build, and distinguish a successful build
+from runtime verification. Runtime verification requires starting the intended
+container and checking its health and relevant service behaviour.
+
+Distinguish checks actually executed from checks merely recommended. If tools
+or environment access are unavailable, or verification is otherwise blocked,
+report that limitation and the unexecuted checks clearly.
 
 Never claim success without evidence.
 
@@ -302,7 +321,7 @@ The application uses:
 - SQLite for persistent URL-shortener data.
 - Docker Compose for deployment.
 
-Development takes place on Charon using WSL Ubuntu.
+Development may take place on Charon (WSL Ubuntu) or Hermes (Raspberry Pi 5, Linux ARM64). Always verify the actual execution host before environment-dependent work.
 
 Deployment targets a Raspberry Pi 5 running Linux ARM64.
 

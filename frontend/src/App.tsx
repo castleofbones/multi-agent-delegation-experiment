@@ -20,6 +20,15 @@ function isLink(value: unknown): value is Link {
   )
 }
 
+function isHttpUrl(value: string): boolean {
+  try {
+    const url = new URL(value)
+    return (url.protocol === 'http:' || url.protocol === 'https:') && Boolean(url.hostname)
+  } catch {
+    return false
+  }
+}
+
 function copyWithFallback(text: string): boolean {
   const textarea = document.createElement('textarea')
   textarea.value = text
@@ -63,6 +72,10 @@ function App() {
   const [saving, setSaving] = useState(false)
   const [actionError, setActionError] = useState('')
   const [feedback, setFeedback] = useState('')
+  const [editingAlias, setEditingAlias] = useState<string | null>(null)
+  const [editDestination, setEditDestination] = useState('')
+  const [editError, setEditError] = useState('')
+  const [savingEdit, setSavingEdit] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
   const normalizedQuery = searchQuery.trim().toLowerCase()
   const filteredLinks = normalizedQuery
@@ -129,6 +142,55 @@ function App() {
       setActionError(error instanceof Error ? error.message : 'Unable to create link.')
     } finally {
       setSaving(false)
+    }
+  }
+
+  function startEditing(link: Link) {
+    setEditingAlias(link.alias)
+    setEditDestination(link.url)
+    setEditError('')
+    setActionError('')
+    setFeedback('')
+  }
+
+  function cancelEditing() {
+    setEditingAlias(null)
+    setEditDestination('')
+    setEditError('')
+    setSavingEdit(false)
+  }
+
+  async function saveDestination(event: FormEvent<HTMLFormElement>, link: Link) {
+    event.preventDefault()
+    const url = editDestination.trim()
+    if (!isHttpUrl(url)) {
+      setEditError('Enter a valid absolute HTTP or HTTPS URL.')
+      return
+    }
+
+    setEditError('')
+    setSavingEdit(true)
+    try {
+      const response = await fetch(`/api/links/${encodeURIComponent(link.alias)}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url }),
+      })
+      if (!response.ok) {
+        throw new Error(await responseError(response, 'Unable to update destination. Please try again.'))
+      }
+      const updated: unknown = await response.json()
+      if (!isLink(updated) || updated.alias !== link.alias) {
+        throw new Error('The server returned an invalid link.')
+      }
+      setLinks((current) => current.map((item) => item.alias === link.alias ? updated : item))
+      setEditingAlias(null)
+      setEditDestination('')
+      setFeedback(`Updated destination for “${link.alias}”.`)
+    } catch (error) {
+      setEditError(error instanceof Error ? error.message : 'Unable to update destination.')
+    } finally {
+      setSavingEdit(false)
     }
   }
 
@@ -278,15 +340,52 @@ function App() {
                       </span>
                     </div>
                     <a className="short-url" href={shortUrl}>{shortUrl}</a>
-                    <a className="destination-url" href={link.url} target="_blank" rel="noreferrer">
-                      {link.url}
-                    </a>
+                    {editingAlias === link.alias ? (
+                      <form className="edit-destination-form" onSubmit={(event) => void saveDestination(event, link)} noValidate>
+                        <label className="field">
+                          <span>Destination URL for {link.alias}</span>
+                          <input
+                            type="url"
+                            value={editDestination}
+                            onChange={(event) => setEditDestination(event.target.value)}
+                            aria-describedby={editError ? `edit-error-${encodeURIComponent(link.alias)}` : undefined}
+                            required
+                          />
+                        </label>
+                        {editError && <p className="message error edit-error" id={`edit-error-${encodeURIComponent(link.alias)}`} role="alert">{editError}</p>}
+                        <div className="link-actions edit-actions">
+                          <button type="submit" className="primary-button" disabled={savingEdit}>
+                            {savingEdit ? 'Saving…' : 'Save destination'}
+                          </button>
+                          <button type="button" className="secondary-button" onClick={cancelEditing} disabled={savingEdit}>
+                            Cancel
+                          </button>
+                        </div>
+                      </form>
+                    ) : (
+                      <a className="destination-url" href={link.url} target="_blank" rel="noreferrer">
+                        {link.url}
+                      </a>
+                    )}
                   </div>
                   <div className="link-actions">
                     <button type="button" className="secondary-button" onClick={() => void copyLink(link)}>
                       Copy
                     </button>
-                    <button type="button" className="delete-button" onClick={() => void deleteLink(link)}>
+                    <button
+                      type="button"
+                      className="secondary-button"
+                      onClick={() => startEditing(link)}
+                      disabled={editingAlias === link.alias}
+                    >
+                      Edit destination
+                    </button>
+                    <button
+                      type="button"
+                      className="delete-button"
+                      onClick={() => void deleteLink(link)}
+                      disabled={editingAlias === link.alias}
+                    >
                       Delete
                     </button>
                   </div>

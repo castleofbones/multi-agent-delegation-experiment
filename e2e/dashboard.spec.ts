@@ -43,6 +43,12 @@ test('create, find, copy, follow and delete a short link', async ({ page, contex
   await expect(targetHeading).toBeVisible()
   await expect(unrelatedHeading).toBeVisible()
 
+  const updatedDestination = `${new URL(destinationUrl).origin}/unrelated`
+  await targetCard.getByRole('button', { name: 'Edit destination' }).click()
+  await targetCard.getByLabel('Destination URL for Browser_E2E').fill(updatedDestination)
+  await targetCard.getByRole('button', { name: 'Save destination' }).click()
+  await expect(targetCard.getByText(updatedDestination, { exact: true })).toBeVisible()
+
   let canReadClipboard = true
   try {
     await context.grantPermissions(['clipboard-read', 'clipboard-write'], { origin: baseURL })
@@ -66,7 +72,7 @@ test('create, find, copy, follow and delete a short link', async ({ page, contex
 
   const destinationPage = await context.newPage()
   await destinationPage.goto(`/Browser_E2E`)
-  await expect(destinationPage).toHaveURL(destinationUrl)
+  await expect(destinationPage).toHaveURL(updatedDestination)
   await expect(destinationPage.getByRole('heading', { name: 'Deterministic E2E destination' })).toBeVisible()
   await destinationPage.close()
 

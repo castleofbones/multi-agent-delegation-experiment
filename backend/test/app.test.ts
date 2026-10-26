@@ -124,6 +124,115 @@ test('deletes a link with HTTP 204 and returns 404 for an unknown alias', async 
   assert.deepEqual(await missing.json(), { error: 'Not found' })
 })
 
+test('updates a link destination while preserving alias and usage count', async (t) => {
+  const api = await startApp()
+  t.after(api.close)
+  api.database.prepare(
+    'INSERT INTO links (alias, destination_url, usage_count) VALUES (?, ?, ?)',
+  ).run('update-me', 'https://before.example', 7)
+
+  const response = await fetch(`${api.url}/api/links/update-me`, {
+    method: 'PATCH',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ url: 'https://after.example/path' }),
+  })
+
+  assert.equal(response.status, 200)
+  assert.deepEqual(await response.json(), {
+    alias: 'update-me',
+    url: 'https://after.example/path',
+    usageCount: 7,
+  })
+  assert.deepEqual(
+    {
+      ...api.database
+        .prepare('SELECT alias, destination_url, usage_count FROM links WHERE alias = ?')
+        .get('update-me'),
+    },
+    { alias: 'update-me', destination_url: 'https://after.example/path', usage_count: 7 },
+  )
+
+  const redirect = await fetch(`${api.url}/update-me`, { redirect: 'manual' })
+  assert.equal(redirect.status, 302)
+  assert.equal(redirect.headers.get('location'), 'https://after.example/path')
+})
+
+test('rejects invalid update input without changing the stored link', async (t) => {
+  const api = await startApp()
+  t.after(api.close)
+  api.database.prepare(
+    'INSERT INTO links (alias, destination_url, usage_count) VALUES (?, ?, ?)',
+  ).run('unchanged', 'https://original.example', 3)
+
+  const invalidInputs = [
+    { body: [], error: 'Request body must be a JSON object' },
+    { body: {}, error: 'url must be an absolute HTTP or HTTPS URL' },
+    { body: { url: 'ftp://invalid.example' }, error: 'url must be an absolute HTTP or HTTPS URL' },
+    { body: { url: 'not a URL' }, error: 'url must be an absolute HTTP or HTTPS URL' },
+  ]
+  for (const { body, error } of invalidInputs) {
+    const response = await fetch(`${api.url}/api/links/unchanged`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+    assert.equal(response.status, 400)
+    assert.deepEqual(await response.json(), { error })
+  }
+
+  assert.deepEqual(
+    {
+      ...api.database
+        .prepare('SELECT alias, destination_url, usage_count FROM links WHERE alias = ?')
+        .get('unchanged'),
+    },
+    { alias: 'unchanged', destination_url: 'https://original.example', usage_count: 3 },
+  )
+})
+
+test('returns the consistent not-found response when updating a missing link', async (t) => {
+  const api = await startApp()
+  t.after(api.close)
+
+  const response = await fetch(`${api.url}/api/links/missing`, {
+    method: 'PATCH',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ url: 'https://example.com' }),
+  })
+
+  assert.equal(response.status, 404)
+  assert.deepEqual(await response.json(), { error: 'Not found' })
+})
+
+test('persists an updated destination across database connections', async (t) => {
+  const directory = mkdtempSync(join(tmpdir(), 'links-update-api-'))
+  const databasePath = join(directory, 'links.sqlite')
+  t.after(() => rmSync(directory, { recursive: true, force: true }))
+  const api = await startApp(databasePath)
+  t.after(api.close)
+  api.database.prepare(
+    'INSERT INTO links (alias, destination_url, usage_count) VALUES (?, ?, ?)',
+  ).run('persistent-update', 'https://before.example', 4)
+
+  const response = await fetch(`${api.url}/api/links/persistent-update`, {
+    method: 'PATCH',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ url: 'https://after.example' }),
+  })
+  assert.equal(response.status, 200)
+  await api.close()
+
+  const reopenedDatabase = new DatabaseSync(databasePath)
+  try {
+    assert.deepEqual(
+      { ...reopenedDatabase.prepare('SELECT alias, destination_url, usage_count FROM links').get() },
+      { alias: 'persistent-update', destination_url: 'https://after.example', usage_count: 4 },
+    )
+  } finally {
+    reopenedDatabase.close()
+  }
+})
+
 test('redirects to the stored destination with HTTP 302', async (t) => {
   const api = await startApp()
   t.after(api.close)

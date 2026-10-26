@@ -50,6 +50,10 @@ h1 { margin-bottom: 8px; font-size: clamp(2.2rem, 5vw, 3.25rem); letter-spacing:
 .link-list { display: grid; gap: 12px; margin: 0; padding: 0; list-style: none; }
 .link-card { display: flex; align-items: center; justify-content: space-between; gap: 22px; padding: 20px 22px; }
 .link-main { min-width: 0; }
+.edit-destination-form { display: grid; gap: 10px; margin-top: 10px; }
+.edit-destination-form .field input { min-width: min(100%, 420px); }
+.edit-error { margin: 0; }
+.edit-actions { flex-wrap: wrap; }
 .link-title-row { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-bottom: 7px; }
 .link-title-row h3 { margin: 0; font-size: 1.08rem; }
 .usage-count { color: #66756c; font-size: .78rem; }

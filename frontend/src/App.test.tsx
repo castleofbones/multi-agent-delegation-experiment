@@ -53,6 +53,111 @@ describe('link dashboard', () => {
     expect(fetch).toHaveBeenCalledWith('/api/links', { signal: expect.any(AbortSignal) })
   })
 
+  it('cancels destination editing without changing the displayed value', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse([link]))
+    vi.stubGlobal('fetch', fetchMock)
+    render(<App />)
+    await screen.findByRole('heading', { name: 'docs' })
+
+    const item = screen.getByRole('listitem')
+    fireEvent.click(within(item).getByRole('button', { name: 'Edit destination' }))
+    const input = within(item).getByLabelText('Destination URL for docs')
+    expect(input).toHaveValue(link.url)
+    expect(within(item).getByRole('button', { name: 'Copy' })).toBeEnabled()
+    expect(within(item).getByRole('button', { name: 'Edit destination' })).toBeDisabled()
+    expect(within(item).getByRole('button', { name: 'Delete' })).toBeDisabled()
+    expect(within(item).getByRole('button', { name: 'Save destination' })).toBeEnabled()
+    expect(within(item).getByRole('button', { name: 'Cancel' })).toBeEnabled()
+    fireEvent.change(input, { target: { value: 'https://changed.example/path' } })
+    fireEvent.click(within(item).getByRole('button', { name: 'Cancel' }))
+
+    expect(within(item).getByRole('button', { name: 'Edit destination' })).toBeEnabled()
+    expect(within(item).getByRole('button', { name: 'Delete' })).toBeEnabled()
+    expect(within(item).getByRole('link', { name: link.url })).toHaveAttribute('href', link.url)
+    expect(within(item).queryByRole('link', { name: 'https://changed.example/path' })).not.toBeInTheDocument()
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps other links actions enabled and allows copying while editing', async () => {
+    const writeText = setupClipboard()
+    const otherLink = { alias: 'blog', url: 'https://example.com/articles', usageCount: 2 }
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse([link, otherLink])))
+    render(<App />)
+    await screen.findByRole('heading', { name: 'docs' })
+
+    const item = screen.getByRole('heading', { name: 'docs' }).closest('li') as HTMLElement
+    const otherItem = screen.getByRole('heading', { name: 'blog' }).closest('li') as HTMLElement
+    fireEvent.click(within(item).getByRole('button', { name: 'Edit destination' }))
+
+    const copyButton = within(item).getByRole('button', { name: 'Copy' })
+    expect(copyButton).toBeEnabled()
+    fireEvent.click(copyButton)
+    expect(writeText).toHaveBeenCalledWith(`${window.location.origin}/docs`)
+    expect(within(otherItem).getByRole('button', { name: 'Copy' })).toBeEnabled()
+    expect(within(otherItem).getByRole('button', { name: 'Edit destination' })).toBeEnabled()
+    expect(within(otherItem).getByRole('button', { name: 'Delete' })).toBeEnabled()
+  })
+
+  it('saves a valid destination through PATCH and updates the link card', async () => {
+    const updated = { ...link, url: 'https://updated.example/page' }
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse([link]))
+      .mockResolvedValueOnce(jsonResponse(updated))
+    vi.stubGlobal('fetch', fetchMock)
+    render(<App />)
+    await screen.findByRole('heading', { name: 'docs' })
+
+    const item = screen.getByRole('listitem')
+    fireEvent.click(within(item).getByRole('button', { name: 'Edit destination' }))
+    expect(within(item).getByRole('button', { name: 'Edit destination' })).toBeDisabled()
+    expect(within(item).getByRole('button', { name: 'Delete' })).toBeDisabled()
+    expect(within(item).getByRole('button', { name: 'Copy' })).toBeEnabled()
+    expect(within(item).getByRole('button', { name: 'Save destination' })).toBeEnabled()
+    expect(within(item).getByRole('button', { name: 'Cancel' })).toBeEnabled()
+    fireEvent.change(within(item).getByLabelText('Destination URL for docs'), {
+      target: { value: updated.url },
+    })
+    fireEvent.click(within(item).getByRole('button', { name: 'Save destination' }))
+
+    expect(await within(item).findByRole('link', { name: updated.url })).toHaveAttribute('href', updated.url)
+    expect(within(item).getByRole('button', { name: 'Edit destination' })).toBeEnabled()
+    expect(within(item).getByRole('button', { name: 'Delete' })).toBeEnabled()
+    expect(fetchMock).toHaveBeenLastCalledWith('/api/links/docs', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url: updated.url }),
+    })
+    expect(await screen.findByRole('status')).toHaveTextContent('Updated destination for “docs”.')
+  })
+
+  it('shows validation and server errors without replacing the stored destination', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse([link]))
+      .mockResolvedValueOnce(jsonResponse({ error: 'Destination could not be updated' }, 400))
+    vi.stubGlobal('fetch', fetchMock)
+    render(<App />)
+    await screen.findByRole('heading', { name: 'docs' })
+
+    const item = screen.getByRole('listitem')
+    fireEvent.click(within(item).getByRole('button', { name: 'Edit destination' }))
+    const input = within(item).getByLabelText('Destination URL for docs')
+    fireEvent.change(input, { target: { value: 'ftp://invalid.example/file' } })
+    fireEvent.click(within(item).getByRole('button', { name: 'Save destination' }))
+    expect(await within(item).findByRole('alert')).toHaveTextContent('Enter a valid absolute HTTP or HTTPS URL.')
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+
+    fireEvent.change(input, { target: { value: 'https://replacement.example' } })
+    fireEvent.click(within(item).getByRole('button', { name: 'Save destination' }))
+    expect(await within(item).findByRole('alert')).toHaveTextContent('Destination could not be updated')
+    expect(fetchMock).toHaveBeenLastCalledWith('/api/links/docs', expect.objectContaining({
+      method: 'PATCH',
+      body: JSON.stringify({ url: 'https://replacement.example' }),
+    }))
+
+    fireEvent.click(within(item).getByRole('button', { name: 'Cancel' }))
+    expect(within(item).getByRole('link', { name: link.url })).toHaveAttribute('href', link.url)
+  })
+
   it('creates a generated short link without sending a custom alias', async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(jsonResponse([]))

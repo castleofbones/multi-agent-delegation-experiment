@@ -68,6 +68,9 @@ export function createApp(database: DatabaseSync, aliasGenerator: AliasGenerator
   const listLinks = database.prepare(
     'SELECT alias, destination_url, usage_count FROM links ORDER BY alias COLLATE BINARY',
   )
+  const updateLinkDestination = database.prepare(
+    'UPDATE links SET destination_url = ? WHERE alias = ? RETURNING alias, destination_url, usage_count',
+  )
   const deleteLink = database.prepare('DELETE FROM links WHERE alias = ?')
   const app = express()
   app.disable('x-powered-by')
@@ -84,6 +87,30 @@ export function createApp(database: DatabaseSync, aliasGenerator: AliasGenerator
       usageCount: link.usage_count,
     }))
     response.json(links)
+  })
+
+  app.patch('/api/links/:alias', (request, response) => {
+    const input: unknown = request.body
+    if (!isRecord(input)) {
+      response.status(400).json({ error: 'Request body must be a JSON object' })
+      return
+    }
+    if (!isValidDestinationUrl(input.url)) {
+      response.status(400).json({ error: 'url must be an absolute HTTP or HTTPS URL' })
+      return
+    }
+
+    const link = updateLinkDestination.get(input.url, request.params.alias)
+    if (!link) {
+      response.status(404).json({ error: 'Not found' })
+      return
+    }
+
+    response.status(200).json({
+      alias: link.alias,
+      url: link.destination_url,
+      usageCount: link.usage_count,
+    })
   })
 
   app.delete('/api/links/:alias', (request, response) => {

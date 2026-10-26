@@ -86,6 +86,18 @@ Run these from the repository root:
 | `npm run build` | Build both workspaces into their respective `dist/` folders |
 | `npm run typecheck` | Type-check application, configuration and test code |
 | `npm test` | Run all automated tests once |
+| `npm run test:e2e` | Build the app and run the isolated browser end-to-end test |
+
+The E2E test requires a compatible Chromium executable in the Playwright browser
+cache or installed on the system; `npm install` does not download a browser. Set
+`PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH` to select a specific executable:
+
+```sh
+PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium npm run test:e2e
+```
+
+The suite starts its own loopback-only app and destination servers and uses a
+throwaway SQLite database.
 
 Workspaces also run independently:
 

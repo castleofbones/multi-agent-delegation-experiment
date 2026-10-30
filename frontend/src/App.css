@@ -45,6 +45,9 @@ h1 { margin-bottom: 8px; font-size: clamp(2.2rem, 5vw, 3.25rem); letter-spacing:
 .search-field { display: grid; flex: 1; gap: 8px; color: #34483d; font-size: .88rem; font-weight: 600; }
 .search-field input { width: 100%; min-height: 44px; border: 1px solid #d7e1db; border-radius: 8px; padding: 0 13px; color: #17231f; background: #fff; }
 .search-field input:focus { border-color: #3c8b61; outline: 3px solid rgb(60 139 97 / 15%); }
+.tag-filters { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 0 0 16px; color: #53675b; font-size: .85rem; }
+.tag-filter { border: 1px solid #c9d9ce; border-radius: 99px; padding: 5px 11px; color: #345e44; background: #f4f8f5; }
+.tag-filter:hover, .tag-filter.selected { color: #fff; background: #247347; }
 .no-match-state p { margin-bottom: 14px; }
 .no-match-state .secondary-button { margin: 0; }
 .link-list { display: grid; gap: 12px; margin: 0; padding: 0; list-style: none; }
@@ -61,6 +64,15 @@ h1 { margin-bottom: 8px; font-size: clamp(2.2rem, 5vw, 3.25rem); letter-spacing:
 .short-url { width: fit-content; margin-bottom: 7px; color: #247347; font-weight: 600; text-decoration: none; }
 .short-url:hover, .destination-url:hover { text-decoration: underline; }
 .destination-url { color: #77847c; font-size: .87rem; text-decoration: none; }
+.link-tags { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 11px; }
+.tag-chip { display: inline-flex; align-items: center; gap: 4px; border-radius: 99px; padding: 3px 6px 3px 10px; color: #345e44; background: #eaf3ed; font-size: .8rem; }
+.tag-chip button { display: inline-grid; width: 22px; height: 22px; place-items: center; border: 0; border-radius: 50%; color: inherit; background: transparent; font-size: 1rem; }
+.tag-chip button:hover:not(:disabled) { background: #d1e5d7; }
+.add-tag-form { display: flex; align-items: end; gap: 8px; margin-top: 10px; }
+.add-tag-form .field { width: min(100%, 230px); gap: 5px; font-size: .78rem; }
+.add-tag-form .field input { min-height: 38px; }
+.add-tag-form .secondary-button { min-height: 38px; }
+.tag-error { margin-top: 8px; }
 .link-actions { display: flex; flex-shrink: 0; gap: 8px; }
 .secondary-button { border: 1px solid #d7e1db; color: #34483d; background: #fff; }
 .secondary-button:hover { background: #f0f5f1; }

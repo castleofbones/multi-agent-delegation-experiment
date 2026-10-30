@@ -18,7 +18,7 @@ function generateAlias(): string {
   ).join('')
 }
 
-function isAliasConflictError(error: unknown): boolean {
+function isUniqueConstraintError(error: unknown): boolean {
   if (typeof error !== 'object' || error === null || !('errcode' in error)) {
     return false
   }
@@ -56,7 +56,13 @@ export function createApp(database: DatabaseSync, aliasGenerator: AliasGenerator
       alias TEXT PRIMARY KEY COLLATE BINARY,
       destination_url TEXT NOT NULL,
       usage_count INTEGER NOT NULL DEFAULT 0
-    )
+    );
+    CREATE TABLE IF NOT EXISTS link_tags (
+      alias TEXT NOT NULL COLLATE BINARY REFERENCES links(alias) ON DELETE CASCADE,
+      tag TEXT NOT NULL COLLATE BINARY,
+      PRIMARY KEY (alias, tag)
+    );
+    PRAGMA foreign_keys = ON;
   `)
 
   const insertLink = database.prepare(
@@ -68,6 +74,12 @@ export function createApp(database: DatabaseSync, aliasGenerator: AliasGenerator
   const listLinks = database.prepare(
     'SELECT alias, destination_url, usage_count FROM links ORDER BY alias COLLATE BINARY',
   )
+  const listLinkTags = database.prepare(
+    'SELECT tag FROM link_tags WHERE alias = ? ORDER BY tag COLLATE BINARY',
+  )
+  const addLinkTag = database.prepare('INSERT INTO link_tags (alias, tag) VALUES (?, ?)')
+  const deleteLinkTag = database.prepare('DELETE FROM link_tags WHERE alias = ? AND tag = ?')
+  const linkExists = database.prepare('SELECT 1 FROM links WHERE alias = ?')
   const updateLinkDestination = database.prepare(
     'UPDATE links SET destination_url = ? WHERE alias = ? RETURNING alias, destination_url, usage_count',
   )
@@ -85,8 +97,51 @@ export function createApp(database: DatabaseSync, aliasGenerator: AliasGenerator
       alias: link.alias,
       url: link.destination_url,
       usageCount: link.usage_count,
+      tags: listLinkTags.all(link.alias).map((row) => row.tag),
     }))
     response.json(links)
+  })
+
+  app.post('/api/links/:alias/tags', (request, response) => {
+    const input: unknown = request.body
+    if (!isRecord(input)) {
+      response.status(400).json({ error: 'Request body must be a JSON object' })
+      return
+    }
+    if (typeof input.tag !== 'string' || input.tag.trim().length === 0) {
+      response.status(400).json({ error: 'tag must be a non-empty string' })
+      return
+    }
+
+    const alias = request.params.alias
+    const tag = input.tag.trim()
+    if (!linkExists.get(alias)) {
+      response.status(404).json({ error: 'Not found' })
+      return
+    }
+
+    try {
+      addLinkTag.run(alias, tag)
+    } catch (error) {
+      if (isUniqueConstraintError(error)) {
+        response.status(409).json({ error: 'tag already exists' })
+        return
+      }
+      throw error
+    }
+
+    response.status(201).json({ alias, tags: listLinkTags.all(alias).map((row) => row.tag) })
+  })
+
+  app.delete('/api/links/:alias/tags/:tag', (request, response) => {
+    const alias = request.params.alias
+    const tag = request.params.tag
+    if (!linkExists.get(alias) || deleteLinkTag.run(alias, tag).changes === 0) {
+      response.status(404).json({ error: 'Not found' })
+      return
+    }
+
+    response.status(204).end()
   })
 
   app.patch('/api/links/:alias', (request, response) => {
@@ -144,7 +199,7 @@ export function createApp(database: DatabaseSync, aliasGenerator: AliasGenerator
       try {
         insertLink.run(alias, input.url)
       } catch (error) {
-        if (isAliasConflictError(error)) {
+        if (isUniqueConstraintError(error)) {
           response.status(409).json({ error: 'alias already exists' })
           return
         }
@@ -162,7 +217,7 @@ export function createApp(database: DatabaseSync, aliasGenerator: AliasGenerator
         response.status(201).json({ alias, url: input.url, usageCount: 0 })
         return
       } catch (error) {
-        if (!isAliasConflictError(error)) {
+        if (!isUniqueConstraintError(error)) {
           next(error)
           return
         }

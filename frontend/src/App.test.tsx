@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, within } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import App from './App'
 
@@ -381,6 +381,111 @@ describe('link dashboard', () => {
     expect(await screen.findByRole('heading', { name: 'new-docs' })).toBeInTheDocument()
     expect(search).toHaveValue('new-docs')
     expect(screen.queryByRole('heading', { name: 'docs' })).not.toBeInTheDocument()
+  })
+
+  it('adds and removes tags using the tag API and displays server-normalized tags', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse([{ ...link, tags: [] }]))
+      .mockResolvedValueOnce(jsonResponse({ alias: 'docs', tags: ['team/ops'] }, 201))
+      .mockResolvedValueOnce(new Response(null, { status: 204 }))
+    vi.stubGlobal('fetch', fetchMock)
+    render(<App />)
+    const item = await screen.findByRole('heading', { name: 'docs' }).then((heading) => heading.closest('li'))
+    expect(item).not.toBeNull()
+
+    fireEvent.change(within(item as HTMLElement).getByLabelText('Add tag to docs'), {
+      target: { value: ' team/ops ' },
+    })
+    fireEvent.click(within(item as HTMLElement).getByRole('button', { name: 'Add tag' }))
+
+    expect(await within(item as HTMLElement).findByText('team/ops')).toBeInTheDocument()
+    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/links/docs/tags', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tag: ' team/ops ' }),
+    })
+    fireEvent.click(within(item as HTMLElement).getByRole('button', { name: 'Remove tag team/ops from docs' }))
+
+    await waitFor(() => expect(within(item as HTMLElement).queryByText('team/ops')).not.toBeInTheDocument())
+    expect(fetchMock).toHaveBeenLastCalledWith('/api/links/docs/tags/team%2Fops', { method: 'DELETE' })
+  })
+
+  it('tracks overlapping tag operations independently and preserves each link tag list', async () => {
+    let resolveDocs!: (response: Response) => void
+    let resolveBlog!: (response: Response) => void
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse([
+        { ...link, tags: ['docs-existing'] },
+        { alias: 'blog', url: 'https://example.com/blog', usageCount: 2, tags: ['blog-existing'] },
+      ]))
+      .mockReturnValueOnce(new Promise<Response>((resolve) => { resolveDocs = resolve }))
+      .mockReturnValueOnce(new Promise<Response>((resolve) => { resolveBlog = resolve }))
+    vi.stubGlobal('fetch', fetchMock)
+    render(<App />)
+
+    const docsItem = await screen.findByRole('heading', { name: 'docs' }).then((heading) => heading.closest('li')) as HTMLElement
+    const blogItem = screen.getByRole('heading', { name: 'blog' }).closest('li') as HTMLElement
+    const docsInput = within(docsItem).getByLabelText('Add tag to docs')
+    const blogInput = within(blogItem).getByLabelText('Add tag to blog')
+
+    fireEvent.change(docsInput, { target: { value: 'docs-new' } })
+    fireEvent.click(within(docsItem).getByRole('button', { name: 'Add tag' }))
+    expect(docsInput).toBeDisabled()
+    expect(within(docsItem).getByRole('button', { name: 'Remove tag docs-existing from docs' })).toBeDisabled()
+    expect(blogInput).toBeEnabled()
+
+    fireEvent.change(blogInput, { target: { value: 'blog-new' } })
+    fireEvent.click(within(blogItem).getByRole('button', { name: 'Add tag' }))
+    expect(docsInput).toBeDisabled()
+    expect(blogInput).toBeDisabled()
+
+    resolveDocs(jsonResponse({ alias: 'docs', tags: ['docs-new'] }, 201))
+    await waitFor(() => expect(docsInput).toBeEnabled())
+    expect(blogInput).toBeDisabled()
+
+    resolveBlog(jsonResponse({ alias: 'blog', tags: ['blog-new'] }, 201))
+    await waitFor(() => expect(blogInput).toBeEnabled())
+    expect(within(docsItem).getByText('docs-existing')).toBeInTheDocument()
+    expect(within(docsItem).getByText('docs-new')).toBeInTheDocument()
+    expect(within(blogItem).getByText('blog-existing')).toBeInTheDocument()
+    expect(within(blogItem).getByText('blog-new')).toBeInTheDocument()
+  })
+
+  it('filters links by selecting a tag while retaining text search', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse([
+      { ...link, tags: ['work', 'reading'] },
+      { alias: 'blog', url: 'https://news.example/articles', usageCount: 2, tags: ['personal'] },
+      { alias: 'notes', url: 'https://example.com/notes', usageCount: 1, tags: ['work'] },
+    ])))
+    render(<App />)
+    await screen.findByRole('heading', { name: 'docs' })
+
+    fireEvent.click(screen.getByRole('button', { name: 'work', pressed: false }))
+    expect(screen.getByRole('heading', { name: 'docs' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'notes' })).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'blog' })).not.toBeInTheDocument()
+
+    fireEvent.change(screen.getByRole('searchbox', { name: 'Search links' }), { target: { value: 'notes' } })
+    expect(screen.getByRole('heading', { name: 'notes' })).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'docs' })).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Clear tag filter' }))
+    expect(screen.getByRole('heading', { name: 'notes' })).toBeInTheDocument()
+    expect(screen.getByRole('searchbox', { name: 'Search links' })).toHaveValue('notes')
+  })
+
+  it('keeps a link unchanged and shows a duplicate-tag error', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse([{ ...link, tags: ['work'] }]))
+      .mockResolvedValueOnce(jsonResponse({ error: 'Tag already exists' }, 409))
+    vi.stubGlobal('fetch', fetchMock)
+    render(<App />)
+    const item = await screen.findByRole('heading', { name: 'docs' }).then((heading) => heading.closest('li'))
+    fireEvent.change(within(item as HTMLElement).getByLabelText('Add tag to docs'), { target: { value: 'work' } })
+    fireEvent.click(within(item as HTMLElement).getByRole('button', { name: 'Add tag' }))
+
+    expect(await within(item as HTMLElement).findByRole('alert')).toHaveTextContent('Tag already exists')
+    expect(within(item as HTMLElement).getAllByText('work')).toHaveLength(1)
   })
 
   it('keeps the active filter after deleting a matching link', async () => {

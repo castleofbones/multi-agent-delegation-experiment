@@ -99,8 +99,8 @@ test('lists saved links with usage counts in deterministic alias order', async (
 
   assert.equal(response.status, 200)
   assert.deepEqual(await response.json(), [
-    { alias: 'A-first', url: 'https://first.example', usageCount: 0 },
-    { alias: 'z-last', url: 'https://last.example', usageCount: 2 },
+    { alias: 'A-first', url: 'https://first.example', usageCount: 0, tags: [] },
+    { alias: 'z-last', url: 'https://last.example', usageCount: 2, tags: [] },
   ])
 })
 
@@ -231,6 +231,120 @@ test('persists an updated destination across database connections', async (t) =>
   } finally {
     reopenedDatabase.close()
   }
+})
+
+test('creates trimmed unique tags, lists them, and deletes them', async (t) => {
+  const api = await startApp()
+  t.after(api.close)
+  const created = await fetch(`${api.url}/api/links`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ alias: 'tagged', url: 'https://tagged.example' }),
+  })
+  assert.equal(created.status, 201)
+
+  const add = (tag: unknown) => fetch(`${api.url}/api/links/tagged/tags`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ tag }),
+  })
+  const added = await add('  work  ')
+  assert.equal(added.status, 201)
+  assert.deepEqual(await added.json(), { alias: 'tagged', tags: ['work'] })
+  assert.equal((await add('work')).status, 409)
+  assert.equal((await add('Work')).status, 201)
+
+  const listed = await fetch(`${api.url}/api/links`)
+  assert.deepEqual(await listed.json(), [
+    { alias: 'tagged', url: 'https://tagged.example', usageCount: 0, tags: ['Work', 'work'] },
+  ])
+
+  const deleted = await fetch(`${api.url}/api/links/tagged/tags/work`, { method: 'DELETE' })
+  assert.equal(deleted.status, 204)
+  assert.equal((await fetch(`${api.url}/api/links/tagged/tags/work`, { method: 'DELETE' })).status, 404)
+  assert.deepEqual(
+    api.database.prepare('SELECT tag FROM link_tags WHERE alias = ?').all('tagged')
+      .map((row) => row.tag),
+    ['Work'],
+  )
+})
+
+test('rejects invalid tags and reports missing links consistently', async (t) => {
+  const api = await startApp()
+  t.after(api.close)
+
+  for (const tag of ['', '   ', 1, null, {}]) {
+    const response = await fetch(`${api.url}/api/links/missing/tags`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ tag }),
+    })
+    assert.equal(response.status, 400)
+    assert.deepEqual(await response.json(), { error: 'tag must be a non-empty string' })
+  }
+  const missingAdd = await fetch(`${api.url}/api/links/missing/tags`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ tag: 'valid' }),
+  })
+  assert.equal(missingAdd.status, 404)
+  assert.deepEqual(await missingAdd.json(), { error: 'Not found' })
+
+  const missingDelete = await fetch(`${api.url}/api/links/missing/tags/valid`, { method: 'DELETE' })
+  assert.equal(missingDelete.status, 404)
+  assert.deepEqual(await missingDelete.json(), { error: 'Not found' })
+})
+
+test('migrates an existing link database and persists tags across reopening', async (t) => {
+  const directory = mkdtempSync(join(tmpdir(), 'links-tags-api-'))
+  const databasePath = join(directory, 'links.sqlite')
+  t.after(() => rmSync(directory, { recursive: true, force: true }))
+
+  const legacyDatabase = new DatabaseSync(databasePath)
+  legacyDatabase.exec(`
+    CREATE TABLE links (
+      alias TEXT PRIMARY KEY COLLATE BINARY,
+      destination_url TEXT NOT NULL,
+      usage_count INTEGER NOT NULL DEFAULT 0
+    );
+    INSERT INTO links (alias, destination_url) VALUES ('legacy', 'https://legacy.example');
+  `)
+  legacyDatabase.close()
+
+  const api = await startApp(databasePath)
+  t.after(api.close)
+  const response = await fetch(`${api.url}/api/links/legacy/tags`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ tag: ' persisted ' }),
+  })
+  assert.equal(response.status, 201)
+  await api.close()
+
+  const reopenedDatabase = new DatabaseSync(databasePath)
+  try {
+    createApp(reopenedDatabase)
+    assert.deepEqual(
+      reopenedDatabase.prepare('SELECT alias, tag FROM link_tags').all()
+        .map((row) => [row.alias, row.tag]),
+      [['legacy', 'persisted']],
+    )
+  } finally {
+    reopenedDatabase.close()
+  }
+})
+
+test('deleting a link also deletes its tags', async (t) => {
+  const api = await startApp()
+  t.after(api.close)
+  api.database.prepare('INSERT INTO links (alias, destination_url) VALUES (?, ?)')
+    .run('cleanup', 'https://cleanup.example')
+  api.database.prepare('INSERT INTO link_tags (alias, tag) VALUES (?, ?)').run('cleanup', 'tag')
+
+  const response = await fetch(`${api.url}/api/links/cleanup`, { method: 'DELETE' })
+
+  assert.equal(response.status, 204)
+  assert.deepEqual(api.database.prepare('SELECT * FROM link_tags').all(), [])
 })
 
 test('redirects to the stored destination with HTTP 302', async (t) => {

@@ -5,9 +5,12 @@ type Link = {
   alias: string
   url: string
   usageCount: number
+  tags: string[]
 }
 
-function isLink(value: unknown): value is Link {
+type LinkPayload = Omit<Link, 'tags'> & { tags?: unknown }
+
+function isLink(value: unknown): value is LinkPayload {
   return (
     typeof value === 'object' &&
     value !== null &&
@@ -16,7 +19,20 @@ function isLink(value: unknown): value is Link {
     'url' in value &&
     typeof value.url === 'string' &&
     'usageCount' in value &&
-    typeof value.usageCount === 'number'
+    typeof value.usageCount === 'number' &&
+    (!('tags' in value) || (Array.isArray(value.tags) && value.tags.every((tag) => typeof tag === 'string')))
+  )
+}
+
+function normalizeLink(link: LinkPayload, fallbackTags: string[] = []): Link {
+  return { ...link, tags: Array.isArray(link.tags) ? link.tags as string[] : fallbackTags }
+}
+
+function isTaggedLink(value: unknown, alias: string): value is { alias: string; tags: string[] } {
+  return (
+    typeof value === 'object' && value !== null &&
+    'alias' in value && value.alias === alias &&
+    'tags' in value && Array.isArray(value.tags) && value.tags.every((tag) => typeof tag === 'string')
   )
 }
 
@@ -77,12 +93,18 @@ function App() {
   const [editError, setEditError] = useState('')
   const [savingEdit, setSavingEdit] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
+  const [selectedTag, setSelectedTag] = useState<string | null>(null)
+  const [tagInputs, setTagInputs] = useState<Record<string, string>>({})
+  const [tagErrors, setTagErrors] = useState<Record<string, string>>({})
+  const [savingTagAliases, setSavingTagAliases] = useState<Record<string, boolean>>({})
   const normalizedQuery = searchQuery.trim().toLowerCase()
-  const filteredLinks = normalizedQuery
-    ? links.filter((link) =>
-        link.alias.toLowerCase().includes(normalizedQuery) || link.url.toLowerCase().includes(normalizedQuery),
-      )
-    : links
+  const availableTags = [...new Set(links.flatMap((link) => link.tags))].sort((a, b) => a.localeCompare(b))
+  const filteredLinks = links.filter((link) => {
+    const matchesQuery = !normalizedQuery ||
+      link.alias.toLowerCase().includes(normalizedQuery) ||
+      link.url.toLowerCase().includes(normalizedQuery)
+    return matchesQuery && (!selectedTag || link.tags.includes(selectedTag))
+  })
 
   useEffect(() => {
     const controller = new AbortController()
@@ -99,7 +121,7 @@ function App() {
         if (!Array.isArray(data) || !data.every(isLink)) {
           throw new Error('The server returned an invalid list of links.')
         }
-        setLinks(data)
+        setLinks(data.map((item) => normalizeLink(item)))
       } catch (error) {
         if (!controller.signal.aborted) {
           setListError(error instanceof Error ? error.message : 'Unable to load links.')
@@ -134,7 +156,7 @@ function App() {
       }
       const created: unknown = await response.json()
       if (!isLink(created)) throw new Error('The server returned an invalid link.')
-      setLinks((current) => [created, ...current])
+      setLinks((current) => [normalizeLink(created), ...current])
       setDestination('')
       setAlias('')
       setFeedback(`Short link created: ${window.location.origin}/${encodeURIComponent(created.alias)}`)
@@ -183,7 +205,7 @@ function App() {
       if (!isLink(updated) || updated.alias !== link.alias) {
         throw new Error('The server returned an invalid link.')
       }
-      setLinks((current) => current.map((item) => item.alias === link.alias ? updated : item))
+      setLinks((current) => current.map((item) => item.alias === link.alias ? normalizeLink(updated, item.tags) : item))
       setEditingAlias(null)
       setEditDestination('')
       setFeedback(`Updated destination for “${link.alias}”.`)
@@ -191,6 +213,65 @@ function App() {
       setEditError(error instanceof Error ? error.message : 'Unable to update destination.')
     } finally {
       setSavingEdit(false)
+    }
+  }
+
+  async function addTag(event: FormEvent<HTMLFormElement>, link: Link) {
+    event.preventDefault()
+    const tag = tagInputs[link.alias] ?? ''
+    if (!tag.trim() || savingTagAliases[link.alias]) return
+
+    setTagErrors((current) => ({ ...current, [link.alias]: '' }))
+    setSavingTagAliases((current) => ({ ...current, [link.alias]: true }))
+    try {
+      const response = await fetch(`/api/links/${encodeURIComponent(link.alias)}/tags`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tag }),
+      })
+      if (!response.ok) {
+        throw new Error(await responseError(response, 'Unable to add tag. Please try again.'))
+      }
+      const result: unknown = await response.json()
+      if (!isTaggedLink(result, link.alias)) throw new Error('The server returned invalid tags.')
+      const addedTags = result.tags.filter((resultTag) => !link.tags.includes(resultTag))
+      setLinks((current) => current.map((item) => item.alias === link.alias
+        ? { ...item, tags: [...new Set([...item.tags, ...addedTags])] }
+        : item,
+      ))
+      setTagInputs((current) => ({ ...current, [link.alias]: '' }))
+    } catch (error) {
+      setTagErrors((current) => ({
+        ...current,
+        [link.alias]: error instanceof Error ? error.message : 'Unable to add tag.',
+      }))
+    } finally {
+      setSavingTagAliases((current) => ({ ...current, [link.alias]: false }))
+    }
+  }
+
+  async function removeTag(link: Link, tag: string) {
+    if (savingTagAliases[link.alias]) return
+    setTagErrors((current) => ({ ...current, [link.alias]: '' }))
+    setSavingTagAliases((current) => ({ ...current, [link.alias]: true }))
+    try {
+      const response = await fetch(
+        `/api/links/${encodeURIComponent(link.alias)}/tags/${encodeURIComponent(tag)}`,
+        { method: 'DELETE' },
+      )
+      if (!response.ok) {
+        throw new Error(await responseError(response, 'Unable to remove tag. Please try again.'))
+      }
+      setLinks((current) => current.map((item) =>
+        item.alias === link.alias ? { ...item, tags: item.tags.filter((itemTag) => itemTag !== tag) } : item,
+      ))
+    } catch (error) {
+      setTagErrors((current) => ({
+        ...current,
+        [link.alias]: error instanceof Error ? error.message : 'Unable to remove tag.',
+      }))
+    } finally {
+      setSavingTagAliases((current) => ({ ...current, [link.alias]: false }))
     }
   }
 
@@ -303,6 +384,27 @@ function App() {
             )}
           </div>
         )}
+        {!loading && !listError && (availableTags.length > 0 || selectedTag) && (
+          <div className="tag-filters" role="group" aria-label="Filter links by tag">
+            <span>Tags:</span>
+            {availableTags.map((tag) => (
+              <button
+                key={tag}
+                type="button"
+                className={`tag-filter${selectedTag === tag ? ' selected' : ''}`}
+                aria-pressed={selectedTag === tag}
+                onClick={() => setSelectedTag((current) => current === tag ? null : tag)}
+              >
+                {tag}
+              </button>
+            ))}
+            {selectedTag && (
+              <button className="secondary-button" type="button" onClick={() => setSelectedTag(null)}>
+                Clear tag filter
+              </button>
+            )}
+          </div>
+        )}
         {!loading && listError && (
           <>
             <p className="panel message error" role="alert">{listError}</p>
@@ -320,10 +422,23 @@ function App() {
         )}
         {!loading && !listError && links.length > 0 && filteredLinks.length === 0 && (
           <div className="panel state-message no-match-state">
-            <p>No links match “{searchQuery.trim()}”.</p>
-            <button className="secondary-button" type="button" onClick={() => setSearchQuery('')}>
-              Clear search
-            </button>
+            <p>
+              {selectedTag && normalizedQuery
+                ? `No links match “${searchQuery.trim()}” with the “${selectedTag}” tag.`
+                : selectedTag
+                  ? `No links have the “${selectedTag}” tag.`
+                  : `No links match “${searchQuery.trim()}”.`}
+            </p>
+            {selectedTag && (
+              <button className="secondary-button" type="button" onClick={() => setSelectedTag(null)}>
+                Clear tag filter
+              </button>
+            )}
+            {normalizedQuery && (
+              <button className="secondary-button" type="button" onClick={() => setSearchQuery('')}>
+                Clear search
+              </button>
+            )}
           </div>
         )}
         {!loading && !listError && filteredLinks.length > 0 && (
@@ -367,6 +482,36 @@ function App() {
                         {link.url}
                       </a>
                     )}
+                    <div className="link-tags" role="group" aria-label={`Tags for ${link.alias}`}>
+                      {link.tags.map((tag) => (
+                        <span className="tag-chip" key={tag}>
+                          <span>{tag}</span>
+                          <button
+                            type="button"
+                            aria-label={`Remove tag ${tag} from ${link.alias}`}
+                            onClick={() => void removeTag(link, tag)}
+                            disabled={Boolean(savingTagAliases[link.alias])}
+                          >
+                            ×
+                          </button>
+                        </span>
+                      ))}
+                    </div>
+                    <form className="add-tag-form" onSubmit={(event) => void addTag(event, link)}>
+                      <label className="field">
+                        <span>Add tag to {link.alias}</span>
+                        <input
+                          type="text"
+                          value={tagInputs[link.alias] ?? ''}
+                          onChange={(event) => setTagInputs((current) => ({ ...current, [link.alias]: event.target.value }))}
+                          disabled={Boolean(savingTagAliases[link.alias])}
+                        />
+                      </label>
+                      <button className="secondary-button" type="submit" disabled={Boolean(savingTagAliases[link.alias]) || !(tagInputs[link.alias] ?? '').trim()}>
+                        {savingTagAliases[link.alias] ? 'Saving…' : 'Add tag'}
+                      </button>
+                    </form>
+                    {tagErrors[link.alias] && <p className="message error tag-error" role="alert">{tagErrors[link.alias]}</p>}
                   </div>
                   <div className="link-actions">
                     <button type="button" className="secondary-button" onClick={() => void copyLink(link)}>
